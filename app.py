@@ -39,6 +39,25 @@ def generate_rules(frequent_itemsets, min_confidence=0.3):
     rules['consequents'] = rules['consequents'].apply(lambda x: list(x))
     return rules.sort_values('confidence', ascending=False)
 
+# Function to nicely print rules as a table
+def print_rules_table(rules):
+    if rules.empty:
+        print("\nNo rules generated.\n")
+        return
+
+    print("\nAssociation Rules:\n")
+    print("{:<40} {:<40} {:<10} {:<10} {:<10}".format('Antecedents', 'Consequents', 'Support', 'Confidence', 'Lift'))
+    print("-" * 120)
+    for _, row in rules.iterrows():
+        print("{:<40} {:<40} {:<10.4f} {:<10.4f} {:<10.4f}".format(
+            ', '.join(row['antecedents']),
+            ', '.join(row['consequents']),
+            row['support'],
+            row['confidence'],
+            row['lift']
+        ))
+    print("\n")
+
 # Routes
 @app.route('/', methods=['GET'])
 def home():
@@ -76,6 +95,9 @@ def get_rules():
         transactions = prepare_transactions(df)
         frequent_itemsets = generate_frequent_itemsets(transactions, min_support)
         rules = generate_rules(frequent_itemsets, min_confidence)
+
+        # Print rules in table format
+        print_rules_table(rules)
 
         rules_list = []
         for _, row in rules.iterrows():
@@ -209,7 +231,7 @@ def internal_error(error):
 # Run the App
 if __name__ == '__main__':
     app.run(
-        host='0.0.0.0',
-        debug=True,
-        port=5000
+        host='0.0.0.0',  # Makes the server publicly available
+        debug=True,      # Enable debug mode for development
+        port=5000        # Running on port 5000
     )
