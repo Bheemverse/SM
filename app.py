@@ -1,36 +1,27 @@
-import pandas as pd
-import random
-import os
-from flask import Flask, jsonify, request, send_file
-from flask_cors import CORS
+from fastapi import FastAPI, HTTPException
 from mlxtend.frequent_patterns import apriori, association_rules
-import logging
-import json
+import pandas as pd
+import os
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# Initialize FastAPI app
+app = FastAPI()
 
-# Initialize Flask app
-app = Flask(__name__)
-CORS(app)
-
-# Load and prepare data
+# Load and prepare data function
 def load_data():
-    if not os.path.exists('dummy_supermarket_sales.xlsx'):  # Changed to new file
+    if not os.path.exists('dummy_supermarket_sales.xlsx'):  # Check file path
         raise FileNotFoundError("File 'dummy_supermarket_sales.xlsx' not found.")
-    df = pd.read_excel('dummy_supermarket_sales.xlsx')  # Changed to new file
+    df = pd.read_excel('dummy_supermarket_sales.xlsx')  # Read data
     if df.empty:
         raise ValueError("The Excel file is empty")
     return df
 
+# Function to prepare transactions for association rule mining
 def prepare_transactions(df):
     transactions = df.groupby(['Invoice ID', 'Product'])['Product'].count().unstack().fillna(0)
     transactions = (transactions > 0).astype(int)
     return transactions
 
+# Generate frequent itemsets and association rules
 def generate_frequent_itemsets(transactions, min_support=0.01):
     return apriori(transactions, min_support=min_support, use_colnames=True)
 
@@ -40,201 +31,30 @@ def generate_rules(frequent_itemsets, min_confidence=0.3):
     rules['consequents'] = rules['consequents'].apply(lambda x: list(x))
     return rules.sort_values('confidence', ascending=False)
 
-# Function to generate rules table as HTML
-def rules_to_html(rules):
-    if rules.empty:
-        return "<p>No rules generated.</p>"
-
-    html = "<h3>Association Rules:</h3>"
-    html += "<table border='1' cellpadding='5' cellspacing='0'>"
-    html += "<tr><th>Antecedents</th><th>Consequents</th><th>Support</th><th>Confidence</th><th>Lift</th></tr>"
-
-    for _, row in rules.iterrows():
-        html += f"<tr><td>{', '.join(row['antecedents'])}</td>"
-        html += f"<td>{', '.join(row['consequents'])}</td>"
-        html += f"<td>{row['support']:.4f}</td>"
-        html += f"<td>{row['confidence']:.4f}</td>"
-        html += f"<td>{row['lift']:.4f}</td></tr>"
-    
-    html += "</table>"
-    return html
-
-# Routes
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({
-        'message': 'Welcome to the Association Rules API!',
-        'available_endpoints': [
-            '/api/products',
-            '/api/rules',
-            '/api/download/rules',
-            '/api/associate-products',
-            '/api/frequent-products'
-        ]
-    })
-
-@app.route('/api/products', methods=['GET'])
-def get_products():
+# API Route to get association rules
+@app.get("/api/rules")
+def get_rules(min_support: float = 0.01, min_confidence: float = 0.3):
     try:
-        df = load_data()
-        products = sorted(df['Product'].unique().tolist())
-        return jsonify({
-            'status': 'success',
-            'products_count': len(products),
-            'products': products
-        })
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/rules', methods=['GET'])
-def get_rules():
-    try:
-        min_support = float(request.args.get('min_support', 0.01))
-        min_confidence = float(request.args.get('min_confidence', 0.3))
-
         df = load_data()
         transactions = prepare_transactions(df)
         frequent_itemsets = generate_frequent_itemsets(transactions, min_support)
         rules = generate_rules(frequent_itemsets, min_confidence)
-
-        # Convert rules to HTML
-        rules_html = rules_to_html(rules)
-
-        # Convert rules to JSON-friendly structure for the API response
-        rules_list = []
+        
+        # Format rules into a plain-text table format
+        table_data = "Antecedents                        | Consequents   | Support | Confidence | Lift\n"
+        table_data += "-" * 90 + "\n"
+        
         for _, row in rules.iterrows():
-            rules_list.append({
-                'antecedents': row['antecedents'],
-                'consequents': row['consequents'],
-                'support': float(row['support']),
-                'confidence': float(row['confidence']),
-                'lift': float(row['lift'])
-            })
+            antecedents = ', '.join(row['antecedents'])
+            consequents = ', '.join(row['consequents'])
+            table_data += f"{antecedents:<35} | {consequents:<12} | {row['support']:<7.4f} | {row['confidence']:<10.4f} | {row['lift']:<5.4f}\n"
 
-        return jsonify({
-            'status': 'success',
-            'rules_count': len(rules_list),
-            'rules': rules_list,
-            'html_table': rules_html  # This includes the HTML table
-        })
+        return {"status": "success", "rules_table": table_data}
 
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
-@app.route('/api/download/rules', methods=['GET'])
-def download_rules():
-    try:
-        df = load_data()
-        transactions = prepare_transactions(df)
-        frequent_itemsets = generate_frequent_itemsets(transactions)
-        rules = generate_rules(frequent_itemsets)
-
-        temp_file = 'temp_rules.json'
-        rules.to_json(temp_file, orient='records')
-
-        return send_file(
-            temp_file,
-            mimetype='application/json',
-            as_attachment=True,
-            download_name='association_rules.json'
-        )
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-    finally:
-        if os.path.exists('temp_rules.json'):
-            try:
-                os.remove('temp_rules.json')
-            except:
-                pass
-
-@app.route('/api/associate-products', methods=['POST'])
-def associate_products():
-    try:
-        data = request.get_json()
-        selected_products = data.get('products', [])
-        min_support = float(data.get('min_support', 0.01))
-        min_confidence = float(data.get('min_confidence', 0.3))
-
-        if not selected_products:
-            return jsonify({'status': 'error', 'message': 'Product list is required'}), 400
-
-        df = load_data()
-        transactions = prepare_transactions(df)
-        frequent_itemsets = generate_frequent_itemsets(transactions, min_support)
-        rules = generate_rules(frequent_itemsets, min_confidence)
-
-        recommended_products = []
-
-        for _, row in rules.iterrows():
-            antecedents = set(row['antecedents'])
-            consequents = set(row['consequents'])
-
-            if antecedents.issubset(set(selected_products)):
-                recommended_products.append({
-                    'based_on': list(antecedents),
-                    'recommend': list(consequents),
-                    'support': float(row['support']),
-                    'confidence': float(row['confidence']),
-                    'lift': float(row['lift'])
-                })
-
-        if not recommended_products:
-            return jsonify({
-                'status': 'success',
-                'message': 'No recommendations found based on selected products',
-                'recommendations': []
-            })
-
-        return jsonify({
-            'status': 'success',
-            'selected_products': selected_products,
-            'recommendations_count': len(recommended_products),
-            'recommendations': recommended_products
-        })
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/frequent-products', methods=['GET'])
-def get_frequent_products():
-    try:
-        min_support = float(request.args.get('min_support', 0.01))
-
-        df = load_data()
-        transactions = prepare_transactions(df)
-        frequent_itemsets = generate_frequent_itemsets(transactions, min_support)
-
-        frequent_list = []
-        for _, row in frequent_itemsets.iterrows():
-            frequent_list.append({
-                'products': list(row['itemsets']),
-                'support': float(row['support'])
-            })
-
-        return jsonify({
-            'status': 'success',
-            'frequent_products_count': len(frequent_list),
-            'frequent_products': frequent_list
-        })
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-# Error Handlers
-@app.errorhandler(404)
-def not_found_error(error):
-    return jsonify({'status': 'error', 'message': 'Endpoint not found'}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    logging.error(f"Server Error: {str(error)}")
-    return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
-
-# Run the App
+# Run the application
 if __name__ == '__main__':
-    app.run(
-        host='0.0.0.0',  # Makes the server publicly available
-        debug=True,      # Enable debug mode for development
-        port=5000        # Running on port 5000
-    )
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
