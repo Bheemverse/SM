@@ -24,8 +24,12 @@ def generate_rules(min_support=None, min_confidence=None):
         if df.empty:
             raise ValueError("The Excel file is empty")
 
-        # Create transactions
-        transactions = df.groupby(['Invoice ID', 'Product'])['Quantity'].sum().unstack().fillna(0)
+        # Ensure there is no 'Quantity' column in the dataset (if it doesn't exist, this will be ignored)
+        if 'Quantity' in df.columns:
+            df = df.drop(columns=['Quantity'])
+
+        # Create transactions (using 'Invoice ID' and 'Product' only)
+        transactions = df.groupby(['Invoice ID', 'Product']).size().unstack().fillna(0)
         transactions = (transactions > 0).astype(int)
 
         # Dynamically calculate min_support if not provided
