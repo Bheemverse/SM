@@ -4,7 +4,7 @@ import pandas as pd
 from mlxtend.frequent_patterns import apriori, association_rules
 import os
 import logging
-import json
+import random
 
 logging.basicConfig(
     level=logging.INFO,
@@ -12,17 +12,30 @@ logging.basicConfig(
 )
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Enable CORS for all routes
+
+# List of supermarket product names
+product_names = [
+    'Bread', 'Milk', 'Cheese', 'Eggs', 'Butter', 'Apples', 'Bananas', 'Chicken', 'Beef', 'Fish',
+    'Rice', 'Pasta', 'Tomato Sauce', 'Cereal', 'Yogurt', 'Orange Juice', 'Cookies', 'Chips',
+    'Soap', 'Shampoo', 'Toothpaste', 'Detergent', 'Paper Towels', 'Tissues', 'Coffee'
+]
+
+# Generate dummy dataset with 500 rows
+def generate_dummy_data():
+    data = []
+    for i in range(500):
+        invoice_id = f'INV-{i+1}'
+        product = random.choice(product_names)
+        quantity = random.randint(1, 5)
+        data.append({'Invoice ID': invoice_id, 'Product line': product, 'Quantity': quantity})
+    df = pd.DataFrame(data)
+    return df
 
 def generate_rules(min_support=0.01, min_confidence=0.3):
     try:
-        # Create a mock dataset with 500 rows
-        data = {
-            'Invoice ID': [f'INV{str(i).zfill(4)}' for i in range(1, 501)],
-            'Product line': [f'Product {i % 10}' for i in range(1, 501)],
-            'Quantity': [1 for _ in range(500)]
-        }
-        df = pd.DataFrame(data)
+        # Generate dummy dataset
+        df = generate_dummy_data()
 
         # Create transactions
         transactions = df.groupby(['Invoice ID', 'Product line'])['Quantity'].sum().unstack().fillna(0)
@@ -30,18 +43,15 @@ def generate_rules(min_support=0.01, min_confidence=0.3):
 
         # Generate frequent itemsets
         frequent_itemsets = apriori(transactions, min_support=min_support, use_colnames=True)
-
-        # Generate rules
-        rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
-
-        # Print frequent items and rules
         print("\nFrequent Itemsets:")
         print(frequent_itemsets)
 
+        # Generate association rules
+        rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
         print("\nAssociation Rules:")
         print(rules[['antecedents', 'consequents', 'support', 'confidence', 'lift']])
 
-        return df, frequent_itemsets, rules.sort_values('confidence', ascending=False)
+        return frequent_itemsets, rules.sort_values('confidence', ascending=False)
 
     except Exception as e:
         raise Exception(f"Error generating rules: {str(e)}")
@@ -68,7 +78,7 @@ def get_rules():
         if not (0 < min_confidence <= 1):
             raise ValueError("min_confidence must be between 0 and 1")
 
-        df, frequent_itemsets, rules = generate_rules(min_support, min_confidence)
+        _, rules = generate_rules(min_support, min_confidence)
 
         rules_list = []
         for idx, row in rules.iterrows():
@@ -96,7 +106,7 @@ def get_rules():
 @app.route('/api/download/rules', methods=['GET'])
 def download_rules():
     try:
-        df, frequent_itemsets, rules = generate_rules()
+        _, rules = generate_rules()
 
         temp_file = 'temp_rules.json'
         rules.to_json(temp_file, orient='records')
@@ -122,20 +132,10 @@ def download_rules():
 
 @app.route('/api/products', methods=['GET'])
 def get_products():
-    try:
-        df, frequent_itemsets, rules = generate_rules()
-        products = df['Product line'].unique().tolist()
-        return jsonify({
-            "status": "success",
-            "products_count": len(products),
-            "products": products
-        })
-
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+    return jsonify({
+        'status': 'success',
+        'products': product_names
+    })
 
 @app.errorhandler(404)
 def not_found_error(error):
