@@ -40,24 +40,24 @@ def generate_rules(frequent_itemsets, min_confidence=0.3):
     rules['consequents'] = rules['consequents'].apply(lambda x: list(x))
     return rules.sort_values('confidence', ascending=False)
 
-# Function to nicely print rules as a table
-def print_rules_table(rules):
+# Function to generate rules table as HTML
+def rules_to_html(rules):
     if rules.empty:
-        print("\nNo rules generated.\n")
-        return
+        return "<p>No rules generated.</p>"
 
-    print("\nAssociation Rules:\n")
-    print("{:<40} {:<40} {:<10} {:<10} {:<10}".format('Antecedents', 'Consequents', 'Support', 'Confidence', 'Lift'))
-    print("-" * 120)
+    html = "<h3>Association Rules:</h3>"
+    html += "<table border='1' cellpadding='5' cellspacing='0'>"
+    html += "<tr><th>Antecedents</th><th>Consequents</th><th>Support</th><th>Confidence</th><th>Lift</th></tr>"
+
     for _, row in rules.iterrows():
-        print("{:<40} {:<40} {:<10.4f} {:<10.4f} {:<10.4f}".format(
-            ', '.join(row['antecedents']),
-            ', '.join(row['consequents']),
-            row['support'],
-            row['confidence'],
-            row['lift']
-        ))
-    print("\n")
+        html += f"<tr><td>{', '.join(row['antecedents'])}</td>"
+        html += f"<td>{', '.join(row['consequents'])}</td>"
+        html += f"<td>{row['support']:.4f}</td>"
+        html += f"<td>{row['confidence']:.4f}</td>"
+        html += f"<td>{row['lift']:.4f}</td></tr>"
+    
+    html += "</table>"
+    return html
 
 # Routes
 @app.route('/', methods=['GET'])
@@ -97,9 +97,10 @@ def get_rules():
         frequent_itemsets = generate_frequent_itemsets(transactions, min_support)
         rules = generate_rules(frequent_itemsets, min_confidence)
 
-        # Print rules in table format
-        print_rules_table(rules)
+        # Convert rules to HTML
+        rules_html = rules_to_html(rules)
 
+        # Convert rules to JSON-friendly structure for the API response
         rules_list = []
         for _, row in rules.iterrows():
             rules_list.append({
@@ -113,7 +114,8 @@ def get_rules():
         return jsonify({
             'status': 'success',
             'rules_count': len(rules_list),
-            'rules': rules_list
+            'rules': rules_list,
+            'html_table': rules_html  # This includes the HTML table
         })
 
     except Exception as e:
