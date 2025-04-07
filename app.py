@@ -3,7 +3,6 @@ from flask_cors import CORS
 import pandas as pd
 from mlxtend.frequent_patterns import apriori, association_rules
 import os
-import json
 import logging
 
 logging.basicConfig(
@@ -14,41 +13,39 @@ logging.basicConfig(
 app = Flask(__name__)
 CORS(app)
 
-DATA_FILE = 'supermarket_sales.xlsx'
-
+# Load the dataset
 def load_data():
-    if not os.path.exists(DATA_FILE):
-        raise FileNotFoundError(f"File '{DATA_FILE}' not found.")
-    df = pd.read_excel(DATA_FILE)
-    df.columns = df.columns.str.strip()
+    if not os.path.exists('supermarket_sales.xlsx'):
+        raise FileNotFoundError("File 'supermarket_sales.xlsx' not found.")
+    df = pd.read_excel('supermarket_sales.xlsx')
     if df.empty:
         raise ValueError("The Excel file is empty.")
-    if 'Product' not in df.columns:
-        raise ValueError("The required column 'Product' was not found.")
     return df
 
+# Prepare transactions
 def prepare_transactions(df):
     transactions = df.groupby(['Invoice ID', 'Product'])['Quantity'].sum().unstack().fillna(0)
     transactions = (transactions > 0).astype(int)
     return transactions
 
-def generate_frequent_itemsets(transactions, min_support):
+# Generate frequent itemsets
+def generate_frequent_itemsets(transactions, min_support=0.01):
     frequent_itemsets = apriori(transactions, min_support=min_support, use_colnames=True)
     return frequent_itemsets
 
-def generate_rules(frequent_itemsets, min_confidence):
+# Generate association rules
+def generate_rules(frequent_itemsets, min_confidence=0.3):
     rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
-    return rules
+    return rules.sort_values('confidence', ascending=False)
 
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
-        'message': 'Welcome to the Supermarket Association Rules API!',
+        'message': 'Welcome to the Association Rules API!',
         'available_endpoints': [
             '/api/products',
-            '/api/frequent-items',
             '/api/rules',
-            '/api/download/frequent-items',
+            '/api/frequent-items',
             '/api/download/rules'
         ]
     })
@@ -57,34 +54,12 @@ def home():
 def get_products():
     try:
         df = load_data()
-        products = sorted(df['Product'].unique().tolist())
+        products = df['Product'].unique().tolist()
         return jsonify({
             "status": "success",
             "products_count": len(products),
             "products": products
         })
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/frequent-items', methods=['GET'])
-def get_frequent_items():
-    try:
-        min_support = float(request.args.get('min_support', 0.01))
-        if not (0 < min_support <= 1):
-            raise ValueError("min_support must be between 0 and 1.")
-
-        df = load_data()
-        transactions = prepare_transactions(df)
-        frequent_itemsets = generate_frequent_itemsets(transactions, min_support)
-
-        frequent_items_list = frequent_itemsets.to_dict(orient='records')
-
-        return jsonify({
-            "status": "success",
-            "frequent_items_count": len(frequent_items_list),
-            "frequent_items": frequent_items_list
-        })
-
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -107,8 +82,8 @@ def get_rules():
         rules_list = []
         for _, row in rules.iterrows():
             rules_list.append({
-                'antecedents': list(row['antecedents']),
-                'consequents': list(row['consequents']),
+                'antecedents': list(map(str, row['antecedents'])),
+                'consequents': list(map(str, row['consequents'])),
                 'support': float(row['support']),
                 'confidence': float(row['confidence']),
                 'lift': float(row['lift'])
@@ -119,14 +94,14 @@ def get_rules():
             "rules_count": len(rules_list),
             "rules": rules_list
         })
-
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/api/download/frequent-items', methods=['GET'])
-def download_frequent_items():
+@app.route('/api/frequent-items', methods=['GET'])
+def get_frequent_items():
     try:
         min_support = float(request.args.get('min_support', 0.01))
+
         if not (0 < min_support <= 1):
             raise ValueError("min_support must be between 0 and 1.")
 
@@ -134,21 +109,21 @@ def download_frequent_items():
         transactions = prepare_transactions(df)
         frequent_itemsets = generate_frequent_itemsets(transactions, min_support)
 
-        temp_file = 'temp_frequent_items.json'
-        frequent_itemsets.to_json(temp_file, orient='records')
+        frequent_list = []
+        for _, row in frequent_itemsets.iterrows():
+            frequent_list.append({
+                'items': list(map(str, row['itemsets'])),
+                'support': float(row['support'])
+            })
 
-        return send_file(
-            temp_file,
-            mimetype='application/json',
-            as_attachment=True,
-            download_name='frequent_items.json'
-        )
+        return jsonify({
+            "status": "success",
+            "frequent_itemsets_count": len(frequent_list),
+            "frequent_itemsets": frequent_list
+        })
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    finally:
-        if os.path.exists('temp_frequent_items.json'):
-            os.remove('temp_frequent_items.json')
 
 @app.route('/api/download/rules', methods=['GET'])
 def download_rules():
@@ -161,19 +136,18 @@ def download_rules():
         frequent_itemsets = generate_frequent_itemsets(transactions, min_support)
         rules = generate_rules(frequent_itemsets, min_confidence)
 
-        rules_json = []
+        rules_list = []
         for _, row in rules.iterrows():
-            rules_json.append({
-                'antecedents': list(row['antecedents']),
-                'consequents': list(row['consequents']),
+            rules_list.append({
+                'antecedents': list(map(str, row['antecedents'])),
+                'consequents': list(map(str, row['consequents'])),
                 'support': float(row['support']),
                 'confidence': float(row['confidence']),
                 'lift': float(row['lift'])
             })
 
         temp_file = 'temp_rules.json'
-        with open(temp_file, 'w') as f:
-            json.dump(rules_json, f, indent=2)
+        pd.DataFrame(rules_list).to_json(temp_file, orient='records', indent=2)
 
         return send_file(
             temp_file,
@@ -186,7 +160,10 @@ def download_rules():
         return jsonify({'status': 'error', 'message': str(e)}), 500
     finally:
         if os.path.exists('temp_rules.json'):
-            os.remove('temp_rules.json')
+            try:
+                os.remove('temp_rules.json')
+            except:
+                pass
 
 @app.errorhandler(404)
 def not_found_error(error):
@@ -198,4 +175,8 @@ def internal_error(error):
     return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(
+        host='0.0.0.0',
+        debug=True,
+        port=5000
+    )
