@@ -172,10 +172,10 @@ def frequent_products():
         for product in product_frequency.index:
             product_data = {
                 'product': product,
-                'frequency': product_frequency[product]
+                'frequency': int(product_frequency[product])  # Convert to native int
             }
             if 'Total' in df.columns:
-                product_data['total_sales'] = product_sales.get(product, 0)
+                product_data['total_sales'] = float(product_sales.get(product, 0))  # Convert to native float
             
             product_info.append(product_data)
 
