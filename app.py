@@ -1,8 +1,9 @@
+import pandas as pd
+import random
+import os
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
-import pandas as pd
 from mlxtend.frequent_patterns import apriori, association_rules
-import os
 import logging
 import json
 
@@ -18,15 +19,15 @@ CORS(app)
 
 # Load and prepare data
 def load_data():
-    if not os.path.exists('supermarket_sales.xlsx'):
-        raise FileNotFoundError("File 'supermarket_sales.xlsx' not found.")
-    df = pd.read_excel('supermarket_sales.xlsx')
+    if not os.path.exists('dummy_supermarket_sales.xlsx'):  # Changed to new file
+        raise FileNotFoundError("File 'dummy_supermarket_sales.xlsx' not found.")
+    df = pd.read_excel('dummy_supermarket_sales.xlsx')  # Changed to new file
     if df.empty:
         raise ValueError("The Excel file is empty")
     return df
 
 def prepare_transactions(df):
-    transactions = df.groupby(['Invoice ID', 'Product'])['Quantity'].sum().unstack().fillna(0)
+    transactions = df.groupby(['Invoice ID', 'Product'])['Product'].count().unstack().fillna(0)
     transactions = (transactions > 0).astype(int)
     return transactions
 
@@ -46,10 +47,10 @@ def print_rules_table(rules):
         return
 
     print("\nAssociation Rules:\n")
-    print("{:<40} {:<40} {:<10} {:<12} {:<10}".format('Antecedents', 'Consequents', 'Support', 'Confidence', 'Lift'))
-    print("-" * 130)
+    print("{:<40} {:<40} {:<10} {:<10} {:<10}".format('Antecedents', 'Consequents', 'Support', 'Confidence', 'Lift'))
+    print("-" * 120)
     for _, row in rules.iterrows():
-        print("{:<40} {:<40} {:<10.4f} {:<12.4f} {:<10.4f}".format(
+        print("{:<40} {:<40} {:<10.4f} {:<10.4f} {:<10.4f}".format(
             ', '.join(row['antecedents']),
             ', '.join(row['consequents']),
             row['support'],
