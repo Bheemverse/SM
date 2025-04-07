@@ -5,6 +5,7 @@ from mlxtend.frequent_patterns import apriori, association_rules
 import os
 import logging
 
+# Logging configuration
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -13,28 +14,37 @@ logging.basicConfig(
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-def generate_rules(min_support=0.01, min_confidence=0.3):
+def generate_rules(min_support=None, min_confidence=None):
     try:
-        # Check if file exists
-        if not os.path.exists('supermarket_sales.xlsx'):
-            raise FileNotFoundError("File 'supermarket_sales.xlsx' not found.")
+        file_path = 'dummy_supermarket_sales.xlsx'
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File '{file_path}' not found.")
 
-        # Read the Excel file
-        df = pd.read_excel('supermarket_sales.xlsx')
+        df = pd.read_excel(file_path)
         if df.empty:
             raise ValueError("The Excel file is empty")
-            
+
         # Create transactions
         transactions = df.groupby(['Invoice ID', 'Product'])['Quantity'].sum().unstack().fillna(0)
         transactions = (transactions > 0).astype(int)
-        
+
+        # Dynamically calculate min_support if not provided
+        if min_support is None:
+            avg_product_freq = transactions.sum(axis=0).mean()
+            total_transactions = len(transactions)
+            min_support = max(0.005, avg_product_freq / total_transactions * 0.5)
+
         # Generate frequent itemsets
         frequent_itemsets = apriori(transactions, min_support=min_support, use_colnames=True)
-        
+
+        # Dynamically choose min_confidence if not provided
+        if min_confidence is None:
+            min_confidence = 0.3 if len(frequent_itemsets) > 0 else 0.1
+
         # Generate rules
         rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
         return rules.sort_values('confidence', ascending=False)
-    
+
     except Exception as e:
         raise Exception(f"Error generating rules: {str(e)}")
 
@@ -51,18 +61,23 @@ def home():
 @app.route('/api/rules', methods=['GET'])
 def get_rules():
     try:
-        # Get and validate parameters
-        min_support = float(request.args.get('min_support', 0.01))
-        min_confidence = float(request.args.get('min_confidence', 0.3))
-        
-        if not (0 < min_support <= 1):
+        # Get parameters
+        min_support = request.args.get('min_support', None)
+        min_confidence = request.args.get('min_confidence', None)
+
+        # Convert to float if provided
+        min_support = float(min_support) if min_support is not None else None
+        min_confidence = float(min_confidence) if min_confidence is not None else None
+
+        # Validate if provided
+        if min_support is not None and not (0 < min_support <= 1):
             raise ValueError("min_support must be between 0 and 1")
-        if not (0 < min_confidence <= 1):
+        if min_confidence is not None and not (0 < min_confidence <= 1):
             raise ValueError("min_confidence must be between 0 and 1")
-            
+
         # Generate rules
         rules = generate_rules(min_support, min_confidence)
-        
+
         # Convert rules to dictionary
         rules_list = []
         for idx, row in rules.iterrows():
@@ -74,22 +89,22 @@ def get_rules():
                 'lift': float(row['lift'])
             }
             rules_list.append(rule_dict)
-        
-        # Generate table-like string for rules
+
+        # Generate table-like string
         table_data = "Antecedents                        | Consequents   | Support | Confidence | Lift\n"
         table_data += "-" * 90 + "\n"
-        
+
         for rule in rules_list:
             antecedents = ', '.join(rule['antecedents'])
             consequents = ', '.join(rule['consequents'])
             table_data += f"{antecedents:<35} | {consequents:<12} | {rule['support']:<7.4f} | {rule['confidence']:<10.4f} | {rule['lift']:<5.4f}\n"
-        
+
         return jsonify({
             "status": "success",
             "rules_count": len(rules_list),
             "rules_table": table_data
         })
-    
+
     except Exception as e:
         return jsonify({
             'status': 'error',
@@ -101,26 +116,25 @@ def download_rules():
     try:
         # Generate rules with default thresholds
         rules = generate_rules()
-        
-        # Save rules to temporary JSON file
+
+        # Save to temp file
         temp_file = 'temp_rules.json'
         rules.to_json(temp_file, orient='records')
-        
-        # Send the file
+
         return send_file(
             temp_file,
             mimetype='application/json',
             as_attachment=True,
             download_name='association_rules.json'
         )
-    
+
     except Exception as e:
         return jsonify({
             'status': 'error',
             'message': str(e)
         }), 500
     finally:
-        # Clean up: delete temp file after sending
+        # Clean up temp file
         if os.path.exists('temp_rules.json'):
             try:
                 os.remove('temp_rules.json')
@@ -144,7 +158,7 @@ def internal_error(error):
 
 if __name__ == '__main__':
     app.run(
-        host='0.0.0.0',  # Makes the server publicly available
-        debug=True,      # Enable debug mode for development
+        host='0.0.0.0',
+        debug=True,
         port=5000
     )
