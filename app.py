@@ -26,7 +26,7 @@ def load_data():
     return df
 
 def prepare_transactions(df):
-    transactions = df.groupby(['Invoice ID', 'Product line'])['Quantity'].sum().unstack().fillna(0)
+    transactions = df.groupby(['Invoice ID', 'Product'])['Quantity'].sum().unstack().fillna(0)
     transactions = (transactions > 0).astype(int)
     return transactions
 
