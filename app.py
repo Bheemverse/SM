@@ -67,7 +67,11 @@ def home():
         'message': 'Welcome to the Association Rules API!',
         'available_endpoints': [
             '/api/rules',
-            '/api/download/rules'
+            '/api/download/rules',
+            '/api/frequent_products',
+            '/api/average_sales',
+            '/api/most_frequent_customers',
+            '/api/product_associations'
         ]
     })
 
@@ -146,6 +150,7 @@ def download_rules():
             'status': 'error',
             'message': str(e)
         }), 500
+
 @app.route('/api/frequent_products', methods=['GET'])
 def frequent_products():
     try:
@@ -188,13 +193,91 @@ def frequent_products():
             'message': str(e)
         }), 500
 
-    finally:
-        # Clean up temp file
-        if os.path.exists('temp_rules.json'):
-            try:
-                os.remove('temp_rules.json')
-            except:
-                pass
+@app.route('/api/average_sales', methods=['GET'])
+def average_sales():
+    try:
+        file_path = 'dummy_supermarket_sales (2).xlsx'
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File '{file_path}' not found.")
+
+        df = pd.read_excel(file_path)
+        if df.empty:
+            raise ValueError("The Excel file is empty")
+
+        # Calculate average sales per product
+        if 'Total' not in df.columns:
+            raise ValueError("Total sales data not found in the dataset.")
+
+        average_sales = df.groupby('Product')['Total'].mean().reset_index()
+        average_sales = average_sales.rename(columns={"Total": "average_sales"})
+
+        return jsonify({
+            'status': 'success',
+            'average_sales': average_sales.to_dict(orient='records')
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/most_frequent_customers', methods=['GET'])
+def most_frequent_customers():
+    try:
+        file_path = 'dummy_supermarket_sales (2).xlsx'
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File '{file_path}' not found.")
+
+        df = pd.read_excel(file_path)
+        if df.empty:
+            raise ValueError("The Excel file is empty")
+
+        # Calculate frequency of customer purchases
+        customer_frequency = df['Customer ID'].value_counts()
+
+        frequent_customers = customer_frequency.head(10).reset_index()
+        frequent_customers.columns = ['Customer ID', 'Frequency']
+
+        return jsonify({
+            'status': 'success',
+            'most_frequent_customers': frequent_customers.to_dict(orient='records')
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/product_associations', methods=['GET'])
+def product_associations():
+    try:
+        file_path = 'dummy_supermarket_sales (2).xlsx'
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File '{file_path}' not found.")
+
+        df = pd.read_excel(file_path)
+        if df.empty:
+            raise ValueError("The Excel file is empty")
+
+        # Assume that you want associations between two or more products in the same basket
+        transactions = df.groupby(['Invoice ID', 'Product']).size().unstack().fillna(0)
+        transactions = (transactions > 0).astype(int)
+
+        frequent_itemsets = apriori(transactions, min_support=0.01, use_colnames=True)
+        rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=0.1)
+
+        return jsonify({
+            'status': 'success',
+            'product_associations': rules.to_dict(orient='records')
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 @app.errorhandler(404)
 def not_found_error(error):
