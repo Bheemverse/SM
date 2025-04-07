@@ -146,6 +146,48 @@ def download_rules():
             'status': 'error',
             'message': str(e)
         }), 500
+@app.route('/api/frequent_products', methods=['GET'])
+def frequent_products():
+    try:
+        # Read data
+        file_path = 'dummy_supermarket_sales (2).xlsx'
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File '{file_path}' not found.")
+
+        df = pd.read_excel(file_path)
+        if df.empty:
+            raise ValueError("The Excel file is empty")
+
+        # Calculate product frequency
+        product_frequency = df['Product'].value_counts()
+
+        # If there are sales or other relevant columns, calculate total sales per product
+        if 'Total' in df.columns:  # Assuming 'Total' is a column for sales amount
+            product_sales = df.groupby('Product')['Total'].sum()
+
+        # Prepare product info (Frequency and Sales if available)
+        product_info = []
+        for product in product_frequency.index:
+            product_data = {
+                'product': product,
+                'frequency': product_frequency[product]
+            }
+            if 'Total' in df.columns:
+                product_data['total_sales'] = product_sales.get(product, 0)
+            
+            product_info.append(product_data)
+
+        return jsonify({
+            'status': 'success',
+            'frequent_products': product_info
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
     finally:
         # Clean up temp file
         if os.path.exists('temp_rules.json'):
