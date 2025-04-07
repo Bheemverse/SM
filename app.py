@@ -25,7 +25,7 @@ def generate_rules(min_support=0.01, min_confidence=0.3):
             raise ValueError("The Excel file is empty")
             
         # Create transactions
-        transactions = df.groupby(['Invoice ID', 'Product line'])['Quantity'].sum().unstack().fillna(0)
+        transactions = df.groupby(['Invoice ID', 'Product'])['Quantity'].sum().unstack().fillna(0)
         transactions = (transactions > 0).astype(int)
         
         # Generate frequent itemsets
