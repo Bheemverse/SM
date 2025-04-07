@@ -39,6 +39,7 @@ def generate_rules(frequent_itemsets, min_confidence=0.3):
     rules['consequents'] = rules['consequents'].apply(lambda x: list(x))
     return rules.sort_values('confidence', ascending=False)
 
+# Routes
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
@@ -47,7 +48,8 @@ def home():
             '/api/products',
             '/api/rules',
             '/api/download/rules',
-            '/api/associate-products'
+            '/api/associate-products',
+            '/api/frequent-products'
         ]
     })
 
@@ -95,92 +97,5 @@ def get_rules():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/download/rules', methods=['GET'])
-def download_rules():
-    try:
-        df = load_data()
-        transactions = prepare_transactions(df)
-        frequent_itemsets = generate_frequent_itemsets(transactions)
-        rules = generate_rules(frequent_itemsets)
+def download_rules_
 
-        temp_file = 'temp_rules.json'
-        rules.to_json(temp_file, orient='records')
-
-        return send_file(
-            temp_file,
-            mimetype='application/json',
-            as_attachment=True,
-            download_name='association_rules.json'
-        )
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-    finally:
-        if os.path.exists('temp_rules.json'):
-            try:
-                os.remove('temp_rules.json')
-            except:
-                pass
-
-@app.route('/api/associate-products', methods=['POST'])
-def associate_products():
-    try:
-        data = request.get_json()
-        selected_products = data.get('products', [])
-        min_support = float(data.get('min_support', 0.01))
-        min_confidence = float(data.get('min_confidence', 0.3))
-
-        if not selected_products:
-            return jsonify({'status': 'error', 'message': 'Product list is required'}), 400
-
-        df = load_data()
-        transactions = prepare_transactions(df)
-        frequent_itemsets = generate_frequent_itemsets(transactions, min_support)
-        rules = generate_rules(frequent_itemsets, min_confidence)
-
-        recommended_products = []
-
-        for _, row in rules.iterrows():
-            antecedents = set(row['antecedents'])
-            consequents = set(row['consequents'])
-
-            if antecedents.issubset(set(selected_products)):
-                recommended_products.append({
-                    'based_on': list(antecedents),
-                    'recommend': list(consequents),
-                    'support': float(row['support']),
-                    'confidence': float(row['confidence']),
-                    'lift': float(row['lift'])
-                })
-
-        if not recommended_products:
-            return jsonify({
-                'status': 'success',
-                'message': 'No recommendations found based on selected products',
-                'recommendations': []
-            })
-
-        return jsonify({
-            'status': 'success',
-            'selected_products': selected_products,
-            'recommendations_count': len(recommended_products),
-            'recommendations': recommended_products
-        })
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.errorhandler(404)
-def not_found_error(error):
-    return jsonify({'status': 'error', 'message': 'Endpoint not found'}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    logging.error(f"Server Error: {str(error)}")
-    return jsonify({'status': 'error', 'message': 'Internal server error'}), 500
-
-if __name__ == '__main__':
-    app.run(
-        host='0.0.0.0',
-        debug=True,
-        port=5000
-    )
