@@ -46,10 +46,10 @@ def print_rules_table(rules):
         return
 
     print("\nAssociation Rules:\n")
-    print("{:<40} {:<40} {:<10} {:<10} {:<10}".format('Antecedents', 'Consequents', 'Support', 'Confidence', 'Lift'))
-    print("-" * 120)
+    print("{:<40} {:<40} {:<10} {:<12} {:<10}".format('Antecedents', 'Consequents', 'Support', 'Confidence', 'Lift'))
+    print("-" * 130)
     for _, row in rules.iterrows():
-        print("{:<40} {:<40} {:<10.4f} {:<10.4f} {:<10.4f}".format(
+        print("{:<40} {:<40} {:<10.4f} {:<12.4f} {:<10.4f}".format(
             ', '.join(row['antecedents']),
             ', '.join(row['consequents']),
             row['support'],
