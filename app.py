@@ -33,7 +33,15 @@ def generate_rules(min_support=0.01, min_confidence=0.3):
 
         # Generate rules
         rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
-        return rules.sort_values('confidence', ascending=False)
+
+        # Print frequent items and rules
+        print("\nFrequent Itemsets:")
+        print(frequent_itemsets)
+
+        print("\nAssociation Rules:")
+        print(rules[['antecedents', 'consequents', 'support', 'confidence', 'lift']])
+
+        return df, frequent_itemsets, rules.sort_values('confidence', ascending=False)
 
     except Exception as e:
         raise Exception(f"Error generating rules: {str(e)}")
@@ -44,7 +52,8 @@ def home():
         'message': 'Welcome to the Association Rules API!',
         'available_endpoints': [
             '/api/rules',
-            '/api/download/rules'
+            '/api/download/rules',
+            '/api/products'
         ]
     })
 
@@ -59,7 +68,7 @@ def get_rules():
         if not (0 < min_confidence <= 1):
             raise ValueError("min_confidence must be between 0 and 1")
 
-        rules = generate_rules(min_support, min_confidence)
+        df, frequent_itemsets, rules = generate_rules(min_support, min_confidence)
 
         rules_list = []
         for idx, row in rules.iterrows():
@@ -87,7 +96,7 @@ def get_rules():
 @app.route('/api/download/rules', methods=['GET'])
 def download_rules():
     try:
-        rules = generate_rules()
+        df, frequent_itemsets, rules = generate_rules()
 
         temp_file = 'temp_rules.json'
         rules.to_json(temp_file, orient='records')
@@ -110,6 +119,23 @@ def download_rules():
                 os.remove('temp_rules.json')
             except:
                 pass
+
+@app.route('/api/products', methods=['GET'])
+def get_products():
+    try:
+        df, frequent_itemsets, rules = generate_rules()
+        products = df['Product line'].unique().tolist()
+        return jsonify({
+            "status": "success",
+            "products_count": len(products),
+            "products": products
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 @app.errorhandler(404)
 def not_found_error(error):
