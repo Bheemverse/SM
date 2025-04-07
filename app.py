@@ -16,7 +16,8 @@ CORS(app)  # Enable CORS for all routes
 
 def generate_rules(min_support=None, min_confidence=None):
     try:
-        file_path = 'dummy_supermarket_sales.xlsx'
+        # Updated file path with new filename
+        file_path = 'dummy_supermarket_sales (2).xlsx'
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File '{file_path}' not found.")
 
@@ -28,22 +29,30 @@ def generate_rules(min_support=None, min_confidence=None):
         if 'Quantity' in df.columns:
             df = df.drop(columns=['Quantity'])
 
+        # Check the basic info about the dataset
+        logging.info(f"Number of unique invoices: {df['Invoice ID'].nunique()}")
+        logging.info(f"Number of unique products: {df['Product'].nunique()}")
+
         # Create transactions (using 'Invoice ID' and 'Product' only)
         transactions = df.groupby(['Invoice ID', 'Product']).size().unstack().fillna(0)
         transactions = (transactions > 0).astype(int)
+
+        # Check if there are enough transactions
+        if transactions.shape[0] == 0 or transactions.shape[1] == 0:
+            raise ValueError("No valid transactions were found after grouping.")
 
         # Dynamically calculate min_support if not provided
         if min_support is None:
             avg_product_freq = transactions.sum(axis=0).mean()
             total_transactions = len(transactions)
-            min_support = max(0.005, avg_product_freq / total_transactions * 0.5)
+            min_support = max(0.005, avg_product_freq / total_transactions * 0.1)  # Adjusting for lower threshold
 
         # Generate frequent itemsets
         frequent_itemsets = apriori(transactions, min_support=min_support, use_colnames=True)
 
         # Dynamically choose min_confidence if not provided
         if min_confidence is None:
-            min_confidence = 0.3 if len(frequent_itemsets) > 0 else 0.1
+            min_confidence = 0.1  # Setting a lower default confidence
 
         # Generate rules
         rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
