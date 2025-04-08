@@ -117,22 +117,26 @@ def get_rule_products():
             'message': str(e)
         }), 500
 
-@app.route('/api/download/rules', methods=['GET'])
-def download_rules():
+@app.route('/api/download/rules/products', methods=['GET'])
+def download_rule_products():
     try:
-        rules = generate_rules()
+        rules_df = generate_rules()
 
-        rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(x))
-        rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(x))
+        unique_products = set()
+        for _, row in rules_df.iterrows():
+            unique_products.update(row['antecedents'])
+            unique_products.update(row['consequents'])
 
-        temp_csv_file = 'association_rules.csv'
-        rules.to_csv(temp_csv_file, index=False)
+        product_df = pd.DataFrame(sorted(list(unique_products)), columns=['product'])
+
+        temp_csv_file = 'unique_rule_products.csv'
+        product_df.to_csv(temp_csv_file, index=False)
 
         return send_file(
             temp_csv_file,
             mimetype='text/csv',
             as_attachment=True,
-            download_name='association_rules.csv'
+            download_name='unique_rule_products.csv'
         )
 
     except Exception as e:
