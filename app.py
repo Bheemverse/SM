@@ -125,14 +125,20 @@ def get_rules():
 def download_rules():
     try:
         rules = generate_rules()
-        temp_file = 'temp_rules.json'
-        rules.to_json(temp_file, orient='records')
+
+        # Convert frozensets to comma-separated strings
+        rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(list(x)))
+        rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(list(x)))
+
+        # Save to CSV
+        temp_csv_file = 'association_rules.csv'
+        rules.to_csv(temp_csv_file, index=False)
 
         return send_file(
-            temp_file,
-            mimetype='application/json',
+            temp_csv_file,
+            mimetype='text/csv',
             as_attachment=True,
-            download_name='association_rules.json'
+            download_name='association_rules.csv'
         )
 
     except Exception as e:
@@ -140,6 +146,7 @@ def download_rules():
             'status': 'error',
             'message': str(e)
         }), 500
+
 
 @app.route('/api/frequent_products', methods=['GET'])
 def frequent_products():
