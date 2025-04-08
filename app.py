@@ -1,6 +1,5 @@
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.middleware.cors import CORSMiddleware
+from flask import Flask, jsonify, request, send_file
+from flask_cors import CORS
 import pandas as pd
 from mlxtend.frequent_patterns import apriori, association_rules
 import os
@@ -12,21 +11,13 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-app = FastAPI()
+app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 
-# Enable CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+file_path = 'dummy_supermarket_sales (2).xlsx'
 
-# Helper function to generate rules
-def generate_rules(min_support: float = None, min_confidence: float = None):
+def generate_rules(min_support=None, min_confidence=None):
     try:
-        file_path = 'dummy_supermarket_sales (2).xlsx'
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File '{file_path}' not found.")
 
@@ -36,9 +27,6 @@ def generate_rules(min_support: float = None, min_confidence: float = None):
 
         if 'Quantity' in df.columns:
             df = df.drop(columns=['Quantity'])
-
-        logging.info(f"Number of unique invoices: {df['Invoice ID'].nunique()}")
-        logging.info(f"Number of unique products: {df['Product'].nunique()}")
 
         transactions = df.groupby(['Invoice ID', 'Product']).size().unstack().fillna(0)
         transactions = (transactions > 0).astype(int)
@@ -62,20 +50,27 @@ def generate_rules(min_support: float = None, min_confidence: float = None):
     except Exception as e:
         raise Exception(f"Error generating rules: {str(e)}")
 
-@app.get("/")
-async def home():
-    return JSONResponse({
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({
         'message': 'Welcome to the Association Rules API!',
         'available_endpoints': [
             '/api/rules',
             '/api/download/rules',
-            '/api/frequent_products'
+            '/api/frequent_products',
+            '/api/products'
         ]
     })
 
-@app.get("/api/rules")
-async def get_rules(min_support: float = Query(default=None), min_confidence: float = Query(default=None)):
+@app.route('/api/rules', methods=['GET'])
+def get_rules():
     try:
+        min_support = request.args.get('min_support', None)
+        min_confidence = request.args.get('min_confidence', None)
+
+        min_support = float(min_support) if min_support is not None else None
+        min_confidence = float(min_confidence) if min_confidence is not None else None
+
         if min_support is not None and not (0 < min_support <= 1):
             raise ValueError("min_support must be between 0 and 1")
         if min_confidence is not None and not (0 < min_confidence <= 1):
@@ -85,53 +80,58 @@ async def get_rules(min_support: float = Query(default=None), min_confidence: fl
 
         rules_list = []
         for idx, row in rules.iterrows():
+            antecedents = list(row['antecedents'])
+            consequents = list(row['consequents'])
+            full_rule = f"{', '.join(antecedents)} -> {', '.join(consequents)}"
             rule_dict = {
-                'antecedents': list(row['antecedents']),
-                'consequents': list(row['consequents']),
+                'rule': full_rule,
                 'support': float(row['support']),
                 'confidence': float(row['confidence']),
                 'lift': float(row['lift'])
             }
             rules_list.append(rule_dict)
 
-        # Table-like string
-        table_data = "Antecedents                        | Consequents   | Support | Confidence | Lift\n"
+        table_data = "Rule                                             | Support | Confidence | Lift\n"
         table_data += "-" * 90 + "\n"
 
         for rule in rules_list:
-            antecedents = ', '.join(rule['antecedents'])
-            consequents = ', '.join(rule['consequents'])
-            table_data += f"{antecedents:<35} | {consequents:<12} | {rule['support']:<7.4f} | {rule['confidence']:<10.4f} | {rule['lift']:<5.4f}\n"
+            table_data += f"{rule['rule']:<50} | {rule['support']:<7.4f} | {rule['confidence']:<10.4f} | {rule['lift']:<5.4f}\n"
 
-        return JSONResponse({
+        return jsonify({
             "status": "success",
             "rules_count": len(rules_list),
             "rules_table": table_data
         })
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
-@app.get("/api/download/rules")
-async def download_rules():
+@app.route('/api/download/rules', methods=['GET'])
+def download_rules():
     try:
         rules = generate_rules()
         temp_file = 'temp_rules.json'
         rules.to_json(temp_file, orient='records')
 
-        return FileResponse(
+        return send_file(
             temp_file,
-            media_type='application/json',
-            filename='association_rules.json'
+            mimetype='application/json',
+            as_attachment=True,
+            download_name='association_rules.json'
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
-@app.get("/api/frequent_products")
-async def frequent_products():
+@app.route('/api/frequent_products', methods=['GET'])
+def frequent_products():
     try:
-        file_path = 'dummy_supermarket_sales (2).xlsx'
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File '{file_path}' not found.")
 
@@ -141,9 +141,6 @@ async def frequent_products():
 
         product_frequency = df['Product'].value_counts()
 
-        if 'Total' in df.columns:
-            product_sales = df.groupby('Product')['Total'].sum()
-
         product_info = []
         for product in product_frequency.index:
             product_data = {
@@ -151,31 +148,64 @@ async def frequent_products():
                 'frequency': int(product_frequency[product])
             }
             if 'Total' in df.columns:
+                product_sales = df.groupby('Product')['Total'].sum()
                 product_data['total_sales'] = float(product_sales.get(product, 0))
             product_info.append(product_data)
 
-        return JSONResponse({
+        return jsonify({
             'status': 'success',
             'frequent_products': product_info
         })
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
-@app.exception_handler(404)
-async def not_found_error(request, exc):
-    return JSONResponse(
-        status_code=404,
-        content={'status': 'error', 'message': 'Endpoint not found'}
-    )
+# New API to fetch all unique products
+@app.route('/api/products', methods=['GET'])
+def get_products():
+    try:
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File '{file_path}' not found.")
 
-@app.exception_handler(500)
-async def internal_error(request, exc):
-    logging.error(f"Server Error: {str(exc)}")
-    return JSONResponse(
-        status_code=500,
-        content={'status': 'error', 'message': 'Internal server error'}
+        df = pd.read_excel(file_path)
+        if df.empty:
+            raise ValueError("The Excel file is empty")
+
+        products = df['Product'].dropna().unique().tolist()
+
+        return jsonify({
+            'status': 'success',
+            'products': products,
+            'count': len(products)
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.errorhandler(404)
+def not_found_error(error):
+    return jsonify({
+        'status': 'error',
+        'message': 'Endpoint not found'
+    }), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    logging.error(f"Server Error: {str(error)}")
+    return jsonify({
+        'status': 'error',
+        'message': 'Internal server error'
+    }), 500
+
+if __name__ == '__main__':
+    app.run(
+        host='0.0.0.0',
+        debug=True,
+        port=5000
     )
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("yourfilename:app", host="0.0.0.0", port=8000, reload=True)
