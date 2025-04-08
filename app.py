@@ -62,53 +62,30 @@ def home():
         ]
     })
 
-@app.route('/api/rules', methods=['GET'])
-def get_rules():
+@app.post("/api/rules")
+async def get_association_rules(file: UploadFile = File(...)):
     try:
-        min_support = request.args.get('min_support', None)
-        min_confidence = request.args.get('min_confidence', None)
-
-        min_support = float(min_support) if min_support is not None else None
-        min_confidence = float(min_confidence) if min_confidence is not None else None
-
-        if min_support is not None and not (0 < min_support <= 1):
-            raise ValueError("min_support must be between 0 and 1")
-        if min_confidence is not None and not (0 < min_confidence <= 1):
-            raise ValueError("min_confidence must be between 0 and 1")
-
-        rules = generate_rules(min_support, min_confidence)
-
-        rules_list = []
-        for idx, row in rules.iterrows():
-            antecedents = list(row['antecedents'])
-            consequents = list(row['consequents'])
-            full_rule = f"{', '.join(antecedents)} -> {', '.join(consequents)}"
-            rule_dict = {
-                'rule': full_rule,
-                'support': float(row['support']),
-                'confidence': float(row['confidence']),
-                'lift': float(row['lift'])
-            }
-            rules_list.append(rule_dict)
-
-        table_data = "Rule                                             | Support | Confidence | Lift\n"
-        table_data += "-" * 90 + "\n"
-
-        for rule in rules_list:
-            table_data += f"{rule['rule']:<50} | {rule['support']:<7.4f} | {rule['confidence']:<10.4f} | {rule['lift']:<5.4f}\n"
-
-        return jsonify({
-            "status": "success",
-            "rules_count": len(rules_list),
-            "rules_table": table_data
-        })
-
+        # Your existing code to read and process the file...
+        df = pd.read_excel(file.file)
+        transactions = df.values.tolist()
+        te = TransactionEncoder()
+        te_ary = te.fit_transform(transactions)
+        df_tf = pd.DataFrame(te_ary, columns=te.columns_)
+        
+        frequent_itemsets = apriori(df_tf, min_support=0.05, use_colnames=True)
+        rules = association_rules(frequent_itemsets, metric="lift", min_threshold=1)
+        
+        # Convert the rules DataFrame into clean JSON
+        rules_table_json = rules.reset_index().to_dict(orient="records")
+        
+        return {
+            "rules_count": len(rules),
+            "rules_table": rules_table_json
+        }
+    
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
+        logging.error(f"Error while generating association rules: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate association rules.")
 @app.route('/api/download/rules', methods=['GET'])
 def download_rules():
     try:
