@@ -1,22 +1,29 @@
-from flask import Flask, jsonify, request, send_file
-from flask_cors import CORS
+from fastapi import FastAPI, Query, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
 import pandas as pd
 from mlxtend.frequent_patterns import apriori, association_rules
 import os
 import logging
 
-# Logging configuration
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+app = FastAPI()
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+# Logging
+logging.basicConfig(level=logging.INFO)
 
+# File path
 file_path = 'dummy_supermarket_sales (2).xlsx'
 
-def generate_rules(min_support=None, min_confidence=None):
+def generate_rules(min_support: float = None, min_confidence: float = None):
     try:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File '{file_path}' not found.")
@@ -30,7 +37,6 @@ def generate_rules(min_support=None, min_confidence=None):
 
         transaction_data = df.groupby(['Invoice ID', 'Product']).size().unstack().fillna(0)
         transaction_data = (transaction_data > 0).astype(int)
-        invoice_ids = transaction_data.index.tolist()
 
         if transaction_data.shape[0] == 0 or transaction_data.shape[1] == 0:
             raise ValueError("No valid transactions were found after grouping.")
@@ -49,157 +55,99 @@ def generate_rules(min_support=None, min_confidence=None):
 
         rule_records = []
         for _, row in rules.iterrows():
-            ant = list(row['antecedents'])
-            cons = list(row['consequents'])
-
-            for invoice_id in invoice_ids:
-                products = set(df[df['Invoice ID'] == invoice_id]['Product'])
-                if set(ant).issubset(products):
-                    rule_records.append({
-                        'invoice_id': invoice_id,
-                        'antecedents': ant,
-                        'consequents': cons,
-                        'support': float(row['support']),
-                        'confidence': float(row['confidence']),
-                        'lift': float(row['lift'])
-                    })
+            rule_records.append({
+                'antecedents': list(row['antecedents']),
+                'consequents': list(row['consequents']),
+                'support': float(row['support']),
+                'confidence': float(row['confidence']),
+                'lift': float(row['lift'])
+            })
 
         return pd.DataFrame(rule_records)
 
     except Exception as e:
         raise Exception(f"Error generating rules: {str(e)}")
 
-def filter_rules_by_product(rules_df, product, role='any'):
+def filter_rules_by_product(rules_df, product: str, role: str = 'any'):
     filtered = []
     for _, row in rules_df.iterrows():
-        ant = row['antecedents']
-        cons = row['consequents']
-
-        if (role == 'antecedent' and product in ant) or \
-           (role == 'consequent' and product in cons) or \
-           (role == 'any' and (product in ant or product in cons)):
+        if (role == 'antecedent' and product in row['antecedents']) or \
+           (role == 'consequent' and product in row['consequents']) or \
+           (role == 'any' and (product in row['antecedents'] or product in row['consequents'])):
             filtered.append(row)
     return pd.DataFrame(filtered)
 
-@app.route('/', methods=['GET'])
+@app.get("/")
 def home():
-    return jsonify({
-        'message': 'Welcome to the Association Rules API!',
-        'available_endpoints': [
-            '/api/rules',
-            '/api/download/rules',
-            '/api/frequent_products',
-            '/api/products',
-            '/api/rules/by_antecedent?product=...',
-            '/api/rules/by_consequent?product=...',
-            '/api/rules/by_product?product=...'
+    return {
+        "message": "Welcome to the Association Rules API!",
+        "available_endpoints": [
+            "/api/rules",
+            "/api/download/rules",
+            "/api/frequent_products",
+            "/api/products",
+            "/api/rules/by_antecedent?product=...",
+            "/api/rules/by_consequent?product=...",
+            "/api/rules/by_product?product=..."
         ]
-    })
+    }
 
-@app.route('/api/rules', methods=['GET'])
-def get_rules():
+@app.get("/api/rules")
+def get_rules(min_support: float = Query(default=None), min_confidence: float = Query(default=None)):
     try:
-        min_support = request.args.get('min_support', None)
-        min_confidence = request.args.get('min_confidence', None)
-
-        min_support = float(min_support) if min_support is not None else None
-        min_confidence = float(min_confidence) if min_confidence is not None else None
-
         rules_df = generate_rules(min_support, min_confidence)
-
-        grouped_rules = {}
-        for _, row in rules_df.iterrows():
-            invoice_id = row['invoice_id']
-            rule = {
-                "antecedents": row['antecedents'],
-                "consequents": row['consequents'],
-                "support": row['support'],
-                "confidence": row['confidence'],
-                "lift": row['lift']
-            }
-
-            if invoice_id not in grouped_rules:
-                grouped_rules[invoice_id] = []
-            grouped_rules[invoice_id].append(rule)
-
-        return jsonify({
+        return {
             "status": "success",
             "rules_count": len(rules_df),
-            "rules_by_invoice": grouped_rules
-        })
-
+            "rules": rules_df.to_dict(orient='records')
+        }
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.route('/api/download/rules', methods=['GET'])
+@app.get("/api/download/rules")
 def download_rules():
     try:
         rules = generate_rules()
-
         rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(x))
         rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(x))
 
         temp_csv_file = 'association_rules.csv'
         rules.to_csv(temp_csv_file, index=False)
 
-        return send_file(
-            temp_csv_file,
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name='association_rules.csv'
-        )
+        return FileResponse(temp_csv_file, media_type='text/csv', filename='association_rules.csv')
 
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.route('/api/rules/by_antecedent')
-def rules_by_antecedent():
+@app.get("/api/products")
+def get_products():
     try:
-        product = request.args.get('product')
-        rules_df = generate_rules()
-        filtered_df = filter_rules_by_product(rules_df, product, 'antecedent')
-        return filtered_df.to_json(orient='records')
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File '{file_path}' not found.")
+        df = pd.read_excel(file_path)
+        if df.empty:
+            raise ValueError("The Excel file is empty")
 
-@app.route('/api/rules/by_consequent')
-def rules_by_consequent():
-    try:
-        product = request.args.get('product')
-        rules_df = generate_rules()
-        filtered_df = filter_rules_by_product(rules_df, product, 'consequent')
-        return filtered_df.to_json(orient='records')
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        products = df['Product'].dropna().unique().tolist()
+        return {
+            'status': 'success',
+            'products': products,
+            'count': len(products)
+        }
 
-@app.route('/api/rules/by_product')
-def rules_by_product():
-    try:
-        product = request.args.get('product')
-        rules_df = generate_rules()
-        filtered_df = filter_rules_by_product(rules_df, product, 'any')
-        return filtered_df.to_json(orient='records')
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.route('/api/frequent_products', methods=['GET'])
+@app.get("/api/frequent_products")
 def frequent_products():
     try:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File '{file_path}' not found.")
-
         df = pd.read_excel(file_path)
         if df.empty:
             raise ValueError("The Excel file is empty")
 
         product_frequency = df['Product'].value_counts()
-
         product_info = []
         for product in product_frequency.index:
             product_data = {
@@ -211,56 +159,40 @@ def frequent_products():
                 product_data['total_sales'] = float(product_sales.get(product, 0))
             product_info.append(product_data)
 
-        return jsonify({
+        return {
             'status': 'success',
             'frequent_products': product_info
-        })
+        }
 
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.route('/api/products', methods=['GET'])
-def get_products():
+@app.get("/api/rules/by_antecedent")
+def rules_by_antecedent(product: str):
     try:
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File '{file_path}' not found.")
-
-        df = pd.read_excel(file_path)
-        if df.empty:
-            raise ValueError("The Excel file is empty")
-
-        products = df['Product'].dropna().unique().tolist()
-
-        return jsonify({
-            'status': 'success',
-            'products': products,
-            'count': len(products)
-        })
-
+        rules_df = generate_rules()
+        filtered_df = filter_rules_by_product(rules_df, product, role='antecedent')
+        return filtered_df.to_dict(orient='records')
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.errorhandler(404)
-def not_found_error(error):
-    return jsonify({
-        'status': 'error',
-        'message': 'Endpoint not found'
-    }), 404
+@app.get("/api/rules/by_consequent")
+def rules_by_consequent(product: str):
+    try:
+        rules_df = generate_rules()
+        filtered_df = filter_rules_by_product(rules_df, product, role='consequent')
+        return filtered_df.to_dict(orient='records')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.errorhandler(500)
-def internal_error(error):
-    logging.error(f"Server Error: {str(error)}")
-    return jsonify({
-        'status': 'error',
-        'message': 'Internal server error'
-    }), 500
-
+@app.get("/api/rules/by_product")
+def rules_by_product(product: str):
+    try:
+        rules_df = generate_rules()
+        filtered_df = filter_rules_by_product(rules_df, product, role='any')
+        return filtered_df.to_dict(orient='records')
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 if __name__ == '__main__':
     app.run(
         host='0.0.0.0',
