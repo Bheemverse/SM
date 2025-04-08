@@ -164,9 +164,17 @@ def rules_by_antecedent():
         product = request.args.get('product')
         rules_df = generate_rules()
         filtered_df = filter_rules_by_product(rules_df, product, 'antecedent')
-        return filtered_df.to_json(orient='records')
+
+        # Get unique consequent products
+        unique_consequents = set()
+        for consequents in filtered_df['consequents']:
+            unique_consequents.update(consequents)
+
+        return jsonify(sorted(unique_consequents))  # Sorted optional
+
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 @app.route('/api/rules/by_consequent')
 def rules_by_consequent():
