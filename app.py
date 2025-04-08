@@ -28,7 +28,6 @@ def generate_rules(min_support=None, min_confidence=None):
         if 'Quantity' in df.columns:
             df = df.drop(columns=['Quantity'])
 
-        # Create a transaction matrix and retain invoice mapping
         transaction_data = df.groupby(['Invoice ID', 'Product']).size().unstack().fillna(0)
         transaction_data = (transaction_data > 0).astype(int)
         invoice_ids = transaction_data.index.tolist()
@@ -48,7 +47,6 @@ def generate_rules(min_support=None, min_confidence=None):
 
         rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
 
-        # Add invoice id to rule records by checking which invoices have the antecedents
         rule_records = []
         for _, row in rules.iterrows():
             ant = list(row['antecedents'])
@@ -71,6 +69,18 @@ def generate_rules(min_support=None, min_confidence=None):
     except Exception as e:
         raise Exception(f"Error generating rules: {str(e)}")
 
+def filter_rules_by_product(rules_df, product, role='any'):
+    filtered = []
+    for _, row in rules_df.iterrows():
+        ant = row['antecedents']
+        cons = row['consequents']
+
+        if (role == 'antecedent' and product in ant) or \
+           (role == 'consequent' and product in cons) or \
+           (role == 'any' and (product in ant or product in cons)):
+            filtered.append(row)
+    return pd.DataFrame(filtered)
+
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
@@ -79,7 +89,10 @@ def home():
             '/api/rules',
             '/api/download/rules',
             '/api/frequent_products',
-            '/api/products'
+            '/api/products',
+            '/api/rules/by_antecedent?product=...',
+            '/api/rules/by_consequent?product=...',
+            '/api/rules/by_product?product=...'
         ]
     })
 
@@ -126,11 +139,9 @@ def download_rules():
     try:
         rules = generate_rules()
 
-        # Convert frozensets to comma-separated strings
-        rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(list(x)))
-        rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(list(x)))
+        rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(x))
+        rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(x))
 
-        # Save to CSV
         temp_csv_file = 'association_rules.csv'
         rules.to_csv(temp_csv_file, index=False)
 
@@ -147,6 +158,35 @@ def download_rules():
             'message': str(e)
         }), 500
 
+@app.route('/api/rules/by_antecedent')
+def rules_by_antecedent():
+    try:
+        product = request.args.get('product')
+        rules_df = generate_rules()
+        filtered_df = filter_rules_by_product(rules_df, product, 'antecedent')
+        return filtered_df.to_json(orient='records')
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/rules/by_consequent')
+def rules_by_consequent():
+    try:
+        product = request.args.get('product')
+        rules_df = generate_rules()
+        filtered_df = filter_rules_by_product(rules_df, product, 'consequent')
+        return filtered_df.to_json(orient='records')
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/api/rules/by_product')
+def rules_by_product():
+    try:
+        product = request.args.get('product')
+        rules_df = generate_rules()
+        filtered_df = filter_rules_by_product(rules_df, product, 'any')
+        return filtered_df.to_json(orient='records')
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/api/frequent_products', methods=['GET'])
 def frequent_products():
@@ -227,4 +267,3 @@ if __name__ == '__main__':
         debug=True,
         port=5000
     )
-
