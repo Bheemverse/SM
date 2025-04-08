@@ -30,10 +30,9 @@ def generate_rules(min_support=None, min_confidence=None):
 
         transaction_data = df.groupby(['Invoice ID', 'Product']).size().unstack().fillna(0)
         transaction_data = (transaction_data > 0).astype(int)
-        invoice_ids = transaction_data.index.tolist()
 
-        if transaction_data.shape[0] == 0 or transaction_data.shape[1] == 0:
-            raise ValueError("No valid transactions were found after grouping.")
+        if transaction_data.empty:
+            raise ValueError("No valid transactions found.")
 
         if min_support is None:
             avg_product_freq = transaction_data.sum(axis=0).mean()
@@ -49,20 +48,13 @@ def generate_rules(min_support=None, min_confidence=None):
 
         rule_records = []
         for _, row in rules.iterrows():
-            ant = list(row['antecedents'])
-            cons = list(row['consequents'])
-
-            for invoice_id in invoice_ids:
-                products = set(df[df['Invoice ID'] == invoice_id]['Product'])
-                if set(ant).issubset(products):
-                    rule_records.append({
-                        'invoice_id': invoice_id,
-                        'antecedents': ant,
-                        'consequents': cons,
-                        'support': float(row['support']),
-                        'confidence': float(row['confidence']),
-                        'lift': float(row['lift'])
-                    })
+            rule_records.append({
+                'antecedents': list(row['antecedents']),
+                'consequents': list(row['consequents']),
+                'support': float(row['support']),
+                'confidence': float(row['confidence']),
+                'lift': float(row['lift'])
+            })
 
         return pd.DataFrame(rule_records)
 
@@ -97,54 +89,65 @@ def home():
         ]
     })
 
-def generate_rules(min_support=None, min_confidence=None):
+@app.route('/api/rules', methods=['GET'])
+def get_rules_products_only():
     try:
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File '{file_path}' not found.")
+        rules_df = generate_rules()
+        unique_products = sorted({item for row in rules_df.itertuples() for item in row.antecedents + row.consequents})
+        return jsonify(unique_products)
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
-        df = pd.read_excel(file_path)
-        if df.empty:
-            raise ValueError("The Excel file is empty")
+@app.route('/api/download/rules', methods=['GET'])
+def download_rule_products_only():
+    try:
+        rules_df = generate_rules()
+        unique_products = sorted({item for row in rules_df.itertuples() for item in row.antecedents + row.consequents})
+        product_df = pd.DataFrame(unique_products, columns=['product'])
 
-        if 'Quantity' in df.columns:
-            df = df.drop(columns=['Quantity'])
+        temp_csv_file = 'rule_products_only.csv'
+        product_df.to_csv(temp_csv_file, index=False)
 
-        # Group by invoice and products to create a binary matrix
-        transaction_data = df.groupby(['Invoice ID', 'Product']).size().unstack().fillna(0)
-        transaction_data = (transaction_data > 0).astype(int)
+        return send_file(
+            temp_csv_file,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name='rule_products_only.csv'
+        )
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
-        if transaction_data.empty:
-            raise ValueError("No valid transactions found.")
+@app.route('/api/download/rules/products', methods=['GET'])
+def download_rule_products():
+    try:
+        rules_df = generate_rules()
+        unique_products = set()
+        for _, row in rules_df.iterrows():
+            unique_products.update(row['antecedents'])
+            unique_products.update(row['consequents'])
 
-        # Dynamic support calculation if not provided
-        if min_support is None:
-            avg_product_freq = transaction_data.sum(axis=0).mean()
-            total_transactions = len(transaction_data)
-            min_support = max(0.005, avg_product_freq / total_transactions * 0.1)
+        product_df = pd.DataFrame(sorted(list(unique_products)), columns=['product'])
+        temp_csv_file = 'unique_rule_products.csv'
+        product_df.to_csv(temp_csv_file, index=False)
 
-        # Apply apriori and get rules
-        frequent_itemsets = apriori(transaction_data, min_support=min_support, use_colnames=True)
-
-        if min_confidence is None:
-            min_confidence = 0.1
-
-        rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
-
-        # Create a clean product-level rule dataframe
-        rule_records = []
-        for _, row in rules.iterrows():
-            rule_records.append({
-                'antecedents': list(row['antecedents']),
-                'consequents': list(row['consequents']),
-                'support': float(row['support']),
-                'confidence': float(row['confidence']),
-                'lift': float(row['lift'])
-            })
-
-        return pd.DataFrame(rule_records)
+        return send_file(
+            temp_csv_file,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name='unique_rule_products.csv'
+        )
 
     except Exception as e:
-        raise Exception(f"Error generating rules: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 @app.route('/api/rules/by_antecedent')
 def rules_by_antecedent():
