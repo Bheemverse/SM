@@ -98,18 +98,35 @@ def home():
 
 @app.route('/api/rules', methods=['GET'])
 def get_rules():
-    try:@app.route('/api/rules/products', methods=['GET'])
-def get_rule_products():
     try:
-        rules_df = generate_rules()
+        min_support = request.args.get('min_support', None)
+        min_confidence = request.args.get('min_confidence', None)
 
-        unique_products = set()
+        min_support = float(min_support) if min_support is not None else None
+        min_confidence = float(min_confidence) if min_confidence is not None else None
 
+        rules_df = generate_rules(min_support, min_confidence)
+
+        grouped_rules = {}
         for _, row in rules_df.iterrows():
-            unique_products.update(row['antecedents'])
-            unique_products.update(row['consequents'])
+            invoice_id = row['invoice_id']
+            rule = {
+                "antecedents": row['antecedents'],
+                "consequents": row['consequents'],
+                "support": row['support'],
+                "confidence": row['confidence'],
+                "lift": row['lift']
+            }
 
-        return jsonify(sorted(list(unique_products)))
+            if invoice_id not in grouped_rules:
+                grouped_rules[invoice_id] = []
+            grouped_rules[invoice_id].append(rule)
+
+        return jsonify({
+            "status": "success",
+            "rules_count": len(rules_df),
+            "rules_by_invoice": grouped_rules
+        })
 
     except Exception as e:
         return jsonify({
@@ -117,26 +134,24 @@ def get_rule_products():
             'message': str(e)
         }), 500
 
-@app.route('/api/download/rules/products', methods=['GET'])
-def download_rule_products():
+@app.route('/api/download/rules', methods=['GET'])
+def download_rules():
     try:
-        rules_df = generate_rules()
+        rules = generate_rules()
 
-        unique_products = set()
-        for _, row in rules_df.iterrows():
-            unique_products.update(row['antecedents'])
-            unique_products.update(row['consequents'])
+        # Convert frozensets to comma-separated strings
+        rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(list(x)))
+        rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(list(x)))
 
-        product_df = pd.DataFrame(sorted(list(unique_products)), columns=['product'])
-
-        temp_csv_file = 'unique_rule_products.csv'
-        product_df.to_csv(temp_csv_file, index=False)
+        # Save to CSV
+        temp_csv_file = 'association_rules.csv'
+        rules.to_csv(temp_csv_file, index=False)
 
         return send_file(
             temp_csv_file,
             mimetype='text/csv',
             as_attachment=True,
-            download_name='unique_rule_products.csv'
+            download_name='association_rules.csv'
         )
 
     except Exception as e:
@@ -144,6 +159,7 @@ def download_rule_products():
             'status': 'error',
             'message': str(e)
         }), 500
+
 
 @app.route('/api/rules/by_antecedent')
 def rules_by_antecedent():
