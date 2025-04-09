@@ -32,7 +32,7 @@ def generate_rules(min_support=None, min_confidence=None):
         transaction_data = (transaction_data > 0).astype(int)
         invoice_ids = transaction_data.index.tolist()
 
-        if transaction_data.shape[0] == 0 or transaction_data.shape[1] == 0:
+        if transaction_data.empty:
             raise ValueError("No valid transactions were found after grouping.")
 
         if min_support is None:
@@ -42,10 +42,16 @@ def generate_rules(min_support=None, min_confidence=None):
 
         frequent_itemsets = apriori(transaction_data, min_support=min_support, use_colnames=True)
 
+        if frequent_itemsets.empty:
+            raise ValueError("No frequent itemsets found. Try lowering min_support.")
+
         if min_confidence is None:
             min_confidence = 0.1
 
         rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
+
+        if rules.empty:
+            raise ValueError("No association rules found. Try lowering min_confidence.")
 
         rule_records = []
         for _, row in rules.iterrows():
@@ -139,11 +145,10 @@ def download_rules():
     try:
         rules = generate_rules()
 
-        # Convert frozensets to comma-separated strings
-        rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(list(x)))
-        rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(list(x)))
+        # Convert antecedents and consequents list to strings
+        rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(x))
+        rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(x))
 
-        # Save to CSV
         temp_csv_file = 'association_rules.csv'
         rules.to_csv(temp_csv_file, index=False)
 
@@ -160,33 +165,35 @@ def download_rules():
             'message': str(e)
         }), 500
 
-
-@app.route('/api/rules/by_antecedent')
+@app.route('/api/rules/by_antecedent', methods=['GET'])
 def rules_by_antecedent():
     try:
         product = request.args.get('product')
+        if not product:
+            return jsonify({"status": "error", "message": "Product parameter is required"}), 400
+
         rules_df = generate_rules()
         filtered_df = filter_rules_by_product(rules_df, product, 'antecedent')
 
-        # Get unique consequent products
         unique_consequents = set()
         for consequents in filtered_df['consequents']:
             unique_consequents.update(consequents)
 
-        return jsonify(sorted(unique_consequents))  # Sorted optional
+        return jsonify(sorted(unique_consequents))
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
-@app.route('/api/rules/by_consequent')
+@app.route('/api/rules/by_consequent', methods=['GET'])
 def rules_by_consequent():
     try:
         product = request.args.get('product')
+        if not product:
+            return jsonify({"status": "error", "message": "Product parameter is required"}), 400
+
         rules_df = generate_rules()
         filtered_df = filter_rules_by_product(rules_df, product, 'consequent')
 
-        # Extract unique antecedents
         unique_antecedents = set()
         for antecedents in filtered_df['antecedents']:
             unique_antecedents.update(antecedents)
@@ -196,28 +203,27 @@ def rules_by_consequent():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
-@app.route('/api/rules/by_product')
+@app.route('/api/rules/by_product', methods=['GET'])
 def rules_by_product():
     try:
         product = request.args.get('product')
+        if not product:
+            return jsonify({"status": "error", "message": "Product parameter is required"}), 400
+
         rules_df = generate_rules()
         filtered_df = filter_rules_by_product(rules_df, product, 'any')
 
-        # Collect unique products from both antecedents and consequents
         related_products = set()
         for _, row in filtered_df.iterrows():
             related_products.update(row['antecedents'])
             related_products.update(row['consequents'])
 
-        # Remove the original product (optional, based on your needs)
         related_products.discard(product)
 
         return jsonify(sorted(related_products))
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
-
 
 @app.route('/api/frequent_products', methods=['GET'])
 def frequent_products():
@@ -229,7 +235,6 @@ def frequent_products():
         if df.empty:
             raise ValueError("The Excel file is empty")
 
-        # Extract product names sorted by frequency
         product_names = df['Product'].value_counts().index.tolist()
 
         return jsonify(product_names)
