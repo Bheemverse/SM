@@ -121,11 +121,21 @@ def get_rules():
 @app.route('/api/download/rules', methods=['GET'])
 def download_rules():
     try:
-        rules = generate_rules()
+        min_support = float(request.args.get('min_support', 0.005))
+        min_confidence = float(request.args.get('min_confidence', 0.1))
+        min_lift = float(request.args.get('min_lift', 1.0))
 
-        # Convert frozensets to comma-separated strings
-        rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(list(x)))
-        rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(list(x)))
+        rules = generate_rules(min_support, min_confidence, min_lift)
+
+        if rules.empty:
+            return jsonify({
+                'status': 'error',
+                'message': 'No association rules found with the given parameters.'
+            }), 404
+
+        # Convert lists to comma-separated strings for saving
+        rules['antecedents'] = rules['antecedents'].apply(lambda x: ', '.join(x))
+        rules['consequents'] = rules['consequents'].apply(lambda x: ', '.join(x))
 
         # Save to CSV
         temp_csv_file = 'association_rules.csv'
@@ -143,7 +153,6 @@ def download_rules():
             'status': 'error',
             'message': str(e)
         }), 500
-
 
 @app.route('/api/rules/by_antecedent')
 def rules_by_antecedent():
