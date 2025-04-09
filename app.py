@@ -31,6 +31,18 @@ def get_rules_products_only():
             'status': 'error',
             'message': str(e)
         }), 500
+def filter_rules_by_product(rules_df, product, role='any'):
+    filtered = []
+    for _, row in rules_df.iterrows():
+        ant = row['antecedents']
+        cons = row['consequents']
+
+        if (role == 'antecedent' and product in ant) or \
+           (role == 'consequent' and product in cons) or \
+           (role == 'any' and (product in ant or product in cons)):
+            filtered.append(row)
+    return pd.DataFrame(filtered)
+
 
 @app.route('/', methods=['GET'])
 def home():
