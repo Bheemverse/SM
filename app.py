@@ -92,9 +92,19 @@ def home():
 @app.route('/api/rules', methods=['GET'])
 def get_rules_products_only():
     try:
-        rules_df = generate_rules()
-        unique_products = sorted({item for row in rules_df.itertuples() for item in row.antecedents + row.consequents})
-        return jsonify(unique_products)
+        # Get query parameters with default values
+        min_support = float(request.args.get('min_support', 0.1))
+        min_confidence = float(request.args.get('min_confidence', 0.5))
+        min_lift = float(request.args.get('min_lift', 1.0))
+
+        rules_df = generate_rules(min_support=min_support, min_confidence=min_confidence)
+
+        # Filter rules based on min_lift
+        rules_df = rules_df[rules_df['lift'] >= min_lift]
+
+        # Return the rules
+        return jsonify(rules_df.to_dict(orient="records"))
+
     except Exception as e:
         return jsonify({
             'status': 'error',
@@ -104,25 +114,31 @@ def get_rules_products_only():
 @app.route('/api/download/rules', methods=['GET'])
 def download_rule_products_only():
     try:
-        rules_df = generate_rules()
-        unique_products = sorted({item for row in rules_df.itertuples() for item in row.antecedents + row.consequents})
-        product_df = pd.DataFrame(unique_products, columns=['product'])
+        # Get query parameters with default values
+        min_support = float(request.args.get('min_support', 0.1))
+        min_confidence = float(request.args.get('min_confidence', 0.5))
+        min_lift = float(request.args.get('min_lift', 1.0))
 
-        temp_csv_file = 'rule_products_only.csv'
-        product_df.to_csv(temp_csv_file, index=False)
+        rules_df = generate_rules(min_support=min_support, min_confidence=min_confidence)
+
+        # Filter rules based on min_lift
+        rules_df = rules_df[rules_df['lift'] >= min_lift]
+
+        temp_csv_file = 'rules_filtered.csv'
+        rules_df.to_csv(temp_csv_file, index=False)
 
         return send_file(
             temp_csv_file,
             mimetype='text/csv',
             as_attachment=True,
-            download_name='rule_products_only.csv'
+            download_name='rules_filtered.csv'
         )
+
     except Exception as e:
         return jsonify({
             'status': 'error',
             'message': str(e)
         }), 500
-
 @app.route('/api/download/rules/products', methods=['GET'])
 def download_rule_products():
     try:
