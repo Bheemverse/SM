@@ -16,7 +16,7 @@ CORS(app)
 
 file_path = 'dummy_supermarket_sales (2).xlsx'
 
-def generate_rules(min_support=None, min_confidence=None):
+def generate_rules(min_support=0.1, min_confidence=0.5, min_lift=1.0):
     try:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File '{file_path}' not found.")
@@ -34,17 +34,12 @@ def generate_rules(min_support=None, min_confidence=None):
         if transaction_data.empty:
             raise ValueError("No valid transactions found.")
 
-        if min_support is None:
-            avg_product_freq = transaction_data.sum(axis=0).mean()
-            total_transactions = len(transaction_data)
-            min_support = max(0.005, avg_product_freq / total_transactions * 0.1)
-
         frequent_itemsets = apriori(transaction_data, min_support=min_support, use_colnames=True)
 
-        if min_confidence is None:
-            min_confidence = 0.1
+        rules = association_rules(frequent_itemsets, metric="lift", min_threshold=min_lift)
 
-        rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
+        # Apply confidence filtering separately
+        rules = rules[rules['confidence'] >= min_confidence]
 
         rule_records = []
         for _, row in rules.iterrows():
@@ -60,6 +55,7 @@ def generate_rules(min_support=None, min_confidence=None):
 
     except Exception as e:
         raise Exception(f"Error generating rules: {str(e)}")
+
 
 def filter_rules_by_product(rules_df, product, role='any'):
     filtered = []
