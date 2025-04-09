@@ -67,6 +67,16 @@ def generate_rules(min_support=None, min_confidence=None, min_lift=None):
 
     except Exception as e:
         raise Exception(f"Error generating rules: {str(e)}")
+ def filter_rules_by_product(rules_df, product_name):
+    """
+    Filter rules where the product appears either in antecedents or consequents.
+    """
+    filtered_rules = rules_df[
+        rules_df['antecedents'].apply(lambda x: product_name in x) |
+        rules_df['consequents'].apply(lambda x: product_name in x)
+    ]
+    return filtered_rules
+       
 
 @app.route('/', methods=['GET'])
 def home():
@@ -86,15 +96,16 @@ def home():
 @app.route('/api/rules', methods=['GET'])
 def get_rules():
     try:
-        min_support = request.args.get('min_support', None)
-        min_confidence = request.args.get('min_confidence', None)
-        min_lift = request.args.get('min_lift', None)
-
-        min_support = float(min_support) if min_support is not None else None
-        min_confidence = float(min_confidence) if min_confidence is not None else None
-        min_lift = float(min_lift) if min_lift is not None else None
+        min_support = float(request.args.get('min_support', 0.005))
+        min_confidence = float(request.args.get('min_confidence', 0.1))
+        min_lift = float(request.args.get('min_lift', 1.0))
+        product_name = request.args.get('product_name', None)  # optional
 
         rules_df = generate_rules(min_support, min_confidence, min_lift)
+
+        # If product_name provided, filter
+        if product_name:
+            rules_df = filter_rules_by_product(rules_df, product_name)
 
         rules_list = []
         for _, row in rules_df.iterrows():
