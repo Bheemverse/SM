@@ -16,7 +16,7 @@ CORS(app)  # Enable CORS for all routes
 
 file_path = 'dummy_supermarket_sales (2).xlsx'
 
-def generate_rules(min_support=None, min_confidence=None):
+def generate_rules(min_support=None, min_confidence=None, min_lift=None):
     try:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File '{file_path}' not found.")
@@ -30,7 +30,6 @@ def generate_rules(min_support=None, min_confidence=None):
 
         transaction_data = df.groupby(['Invoice ID', 'Product']).size().unstack().fillna(0)
         transaction_data = (transaction_data > 0).astype(int)
-        invoice_ids = transaction_data.index.tolist()
 
         if transaction_data.shape[0] == 0 or transaction_data.shape[1] == 0:
             raise ValueError("No valid transactions were found after grouping.")
@@ -40,46 +39,34 @@ def generate_rules(min_support=None, min_confidence=None):
             total_transactions = len(transaction_data)
             min_support = max(0.005, avg_product_freq / total_transactions * 0.1)
 
-        frequent_itemsets = apriori(transaction_data, min_support=min_support, use_colnames=True)
-
         if min_confidence is None:
             min_confidence = 0.1
 
+        if min_lift is None:
+            min_lift = 1.0  # Reasonable minimum lift
+
+        frequent_itemsets = apriori(transaction_data, min_support=min_support, use_colnames=True)
+
         rules = association_rules(frequent_itemsets, metric="confidence", min_threshold=min_confidence)
 
+        # Filter by minimum lift
+        rules = rules[rules['lift'] >= min_lift]
+
+        # Build clean result
         rule_records = []
         for _, row in rules.iterrows():
-            ant = list(row['antecedents'])
-            cons = list(row['consequents'])
-
-            for invoice_id in invoice_ids:
-                products = set(df[df['Invoice ID'] == invoice_id]['Product'])
-                if set(ant).issubset(products):
-                    rule_records.append({
-                        'invoice_id': invoice_id,
-                        'antecedents': ant,
-                        'consequents': cons,
-                        'support': float(row['support']),
-                        'confidence': float(row['confidence']),
-                        'lift': float(row['lift'])
-                    })
+            rule_records.append({
+                'antecedents': list(row['antecedents']),
+                'consequents': list(row['consequents']),
+                'support': float(row['support']),
+                'confidence': float(row['confidence']),
+                'lift': float(row['lift'])
+            })
 
         return pd.DataFrame(rule_records)
 
     except Exception as e:
         raise Exception(f"Error generating rules: {str(e)}")
-
-def filter_rules_by_product(rules_df, product, role='any'):
-    filtered = []
-    for _, row in rules_df.iterrows():
-        ant = row['antecedents']
-        cons = row['consequents']
-
-        if (role == 'antecedent' and product in ant) or \
-           (role == 'consequent' and product in cons) or \
-           (role == 'any' and (product in ant or product in cons)):
-            filtered.append(row)
-    return pd.DataFrame(filtered)
 
 @app.route('/', methods=['GET'])
 def home():
@@ -101,31 +88,28 @@ def get_rules():
     try:
         min_support = request.args.get('min_support', None)
         min_confidence = request.args.get('min_confidence', None)
+        min_lift = request.args.get('min_lift', None)
 
         min_support = float(min_support) if min_support is not None else None
         min_confidence = float(min_confidence) if min_confidence is not None else None
+        min_lift = float(min_lift) if min_lift is not None else None
 
-        rules_df = generate_rules(min_support, min_confidence)
+        rules_df = generate_rules(min_support, min_confidence, min_lift)
 
-        grouped_rules = {}
+        rules_list = []
         for _, row in rules_df.iterrows():
-            invoice_id = row['invoice_id']
-            rule = {
+            rules_list.append({
                 "antecedents": row['antecedents'],
                 "consequents": row['consequents'],
                 "support": row['support'],
                 "confidence": row['confidence'],
                 "lift": row['lift']
-            }
-
-            if invoice_id not in grouped_rules:
-                grouped_rules[invoice_id] = []
-            grouped_rules[invoice_id].append(rule)
+            })
 
         return jsonify({
             "status": "success",
-            "rules_count": len(rules_df),
-            "rules_by_invoice": grouped_rules
+            "rules_count": len(rules_list),
+            "rules": rules_list
         })
 
     except Exception as e:
