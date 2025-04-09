@@ -16,58 +16,21 @@ CORS(app)
 
 file_path = 'dummy_supermarket_sales (2).xlsx'
 
-def generate_rules(min_support=0.1, min_confidence=0.5, min_lift=1.0):
+@app.route('/api/rules', methods=['GET'])
+def get_rules_products_only():
     try:
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File '{file_path}' not found.")
+        min_support = float(request.args.get('min_support', 0.1))
+        min_confidence = float(request.args.get('min_confidence', 0.5))
+        min_lift = float(request.args.get('min_lift', 1.0))
 
-        df = pd.read_excel(file_path)
-        if df.empty:
-            raise ValueError("The Excel file is empty")
-
-        if 'Quantity' in df.columns:
-            df = df.drop(columns=['Quantity'])
-
-        transaction_data = df.groupby(['Invoice ID', 'Product']).size().unstack().fillna(0)
-        transaction_data = (transaction_data > 0).astype(int)
-
-        if transaction_data.empty:
-            raise ValueError("No valid transactions found.")
-
-        frequent_itemsets = apriori(transaction_data, min_support=min_support, use_colnames=True)
-
-        rules = association_rules(frequent_itemsets, metric="lift", min_threshold=min_lift)
-
-        # Apply confidence filtering separately
-        rules = rules[rules['confidence'] >= min_confidence]
-
-        rule_records = []
-        for _, row in rules.iterrows():
-            rule_records.append({
-                'antecedents': list(row['antecedents']),
-                'consequents': list(row['consequents']),
-                'support': float(row['support']),
-                'confidence': float(row['confidence']),
-                'lift': float(row['lift'])
-            })
-
-        return pd.DataFrame(rule_records)
-
+        rules_df = generate_rules(min_support=min_support, min_confidence=min_confidence, min_lift=min_lift)
+        unique_products = sorted({item for row in rules_df.itertuples() for item in row.antecedents + row.consequents})
+        return jsonify(unique_products)
     except Exception as e:
-        raise Exception(f"Error generating rules: {str(e)}")
-
-
-def filter_rules_by_product(rules_df, product, role='any'):
-    filtered = []
-    for _, row in rules_df.iterrows():
-        ant = row['antecedents']
-        cons = row['consequents']
-
-        if (role == 'antecedent' and product in ant) or \
-           (role == 'consequent' and product in cons) or \
-           (role == 'any' and (product in ant or product in cons)):
-            filtered.append(row)
-    return pd.DataFrame(filtered)
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
 
 @app.route('/', methods=['GET'])
 def home():
